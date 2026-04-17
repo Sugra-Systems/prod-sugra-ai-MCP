@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from ..server import get_client, mcp
+from ..server import READ_ONLY_TOOL, get_client, mcp
 
 AssetType = Literal["stock", "crypto", "forex", "commodity"]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_market_price(
     symbol: str,
     asset_type: AssetType = "stock",
@@ -55,7 +55,7 @@ async def get_market_price(
     return {"error": f"Unknown asset_type: {asset_type}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_historical_prices(
     symbol: str,
     asset_type: AssetType = "stock",
@@ -101,7 +101,7 @@ async def get_historical_prices(
     return {"error": f"Unknown asset_type: {asset_type}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def search_symbol(query: str, asset_type: AssetType | None = None) -> dict[str, Any]:
     """Find a ticker or symbol by company name, description, or free-text query.
 
@@ -126,7 +126,7 @@ async def search_symbol(query: str, asset_type: AssetType | None = None) -> dict
     return {"error": f"search_symbol does not support asset_type={asset_type}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_market_overview(asset_type: Literal["stock", "crypto"] = "crypto") -> dict[str, Any]:
     """Get a market snapshot: top movers, total market cap, sector performance.
 
@@ -143,7 +143,7 @@ async def get_market_overview(asset_type: Literal["stock", "crypto"] = "crypto")
     return await client.get("/api/v2/market/overview")
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_prediction_market(
     query: str | None = None,
     event_ticker: str | None = None,

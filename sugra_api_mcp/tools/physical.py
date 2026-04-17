@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from ..server import get_client, mcp
+from ..server import READ_ONLY_TOOL, get_client, mcp
 
 WeatherMode = Literal["current", "forecast", "history"]
 EnvDataset = Literal["fires", "vessels", "vessel_detail", "vessel_events"]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_weather(
     mode: WeatherMode = "current",
     city: str | None = None,
@@ -48,7 +48,7 @@ async def get_weather(
     return await client.get(f"/api/v1/weather/{mode}", params=params)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_environmental_data(
     dataset: EnvDataset,
     vessel_id: str | None = None,

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from ..server import get_client, mcp
+from ..server import READ_ONLY_TOOL, get_client, mcp
 
 TreasuryDataset = Literal["debt", "debt-history", "rates", "interest-expense", "catalog"]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_government_spending(
     agency_code: str | None = None,
     fiscal_year: int | None = None,
@@ -39,7 +39,7 @@ async def get_government_spending(
     return await client.get("/api/v1/usaspending/agencies")
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_treasury_data(
     dataset: TreasuryDataset = "debt",
     limit: int = 100,

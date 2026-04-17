@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from ..server import get_client, mcp
+from ..server import READ_ONLY_TOOL, get_client, mcp
 
 CentralBank = Literal["fed", "ecb", "boj", "boe", "snb", "pboc", "rba", "boc"]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_macro_indicator(
     country: str,
     section: str,
@@ -40,7 +40,7 @@ async def get_macro_indicator(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_central_bank_rate(
     bank: CentralBank = "fed",
     rate_type: str | None = None,
@@ -74,7 +74,7 @@ async def get_central_bank_rate(
     return await client.get(f"/api/v1/macro/{country_map[bank]}/interest-rate")
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def search_economic_series(
     query: str,
     limit: int = 20,

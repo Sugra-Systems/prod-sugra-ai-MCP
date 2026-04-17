@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..server import get_client, mcp
+from ..server import READ_ONLY_TOOL, get_client, mcp
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_news(
     query: str | None = None,
     region: str | None = None,

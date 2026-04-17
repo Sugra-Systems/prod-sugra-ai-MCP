@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from ..server import get_client, mcp
+from ..server import READ_ONLY_TOOL, get_client, mcp
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_company_overview(ticker: str) -> dict[str, Any]:
     """Get key financial metrics overview for a publicly-traded company.
 
@@ -24,7 +24,7 @@ async def get_company_overview(ticker: str) -> dict[str, Any]:
     return await client.get(f"/api/v1/fundamentals/{ticker.upper()}/overview")
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def get_company_filings(
     ticker: str,
     jurisdiction: Literal["us", "jp"] = "us",

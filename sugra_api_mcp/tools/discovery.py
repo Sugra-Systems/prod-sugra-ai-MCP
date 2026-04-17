@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..server import get_client, mcp
+from ..server import READ_ONLY_TOOL, get_client, mcp
 
 _OPENAPI_CACHE: dict[str, Any] | None = None
 
@@ -18,7 +18,7 @@ async def _load_openapi() -> dict[str, Any]:
     return _OPENAPI_CACHE
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def search_endpoint(query: str, limit: int = 10) -> dict[str, Any]:
     """Search across all 518+ Sugra API endpoints by natural-language query.
 
@@ -81,7 +81,7 @@ async def search_endpoint(query: str, limit: int = 10) -> dict[str, Any]:
     return {"results": [m[1] for m in matches[:limit]], "total_matched": len(matches)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL)
 async def call_endpoint(
     path: str,
     method: str = "GET",
