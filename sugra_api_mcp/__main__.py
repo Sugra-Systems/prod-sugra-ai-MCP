@@ -1,0 +1,48 @@
+"""Entry point: `python -m sugra_api_mcp` or `sugra-api-mcp` CLI."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from typing import Literal
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="sugra-api-mcp",
+        description="Sugra API MCP server",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help="MCP transport (default: stdio for Claude Desktop / Cursor / Zed)",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind host for streamable-http (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8001,
+        help="Bind port for streamable-http (default: 8001)",
+    )
+    args = parser.parse_args()
+
+    # Import tools to register them with the FastMCP instance.
+    from . import tools  # noqa: F401
+    from .server import mcp
+
+    transport: Literal["stdio", "streamable-http"] = args.transport
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.settings.host = args.host
+        mcp.settings.port = args.port
+        mcp.run(transport="streamable-http")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

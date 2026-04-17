@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sugra-api-mcp"
+version = "0.1.0"
+description = "Sugra API MCP server - unified access to 518+ intelligence endpoints from Claude Desktop, Cursor, Zed, and any MCP-compatible client"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Sugra Systems, Inc.", email = "support@sugra.systems" },
+]
+requires-python = ">=3.13"
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "sugra",
+    "finance",
+    "macro",
+    "claude",
+    "ai-agents",
+    "llm",
+    "data",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "mcp>=1.2.0",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+]
+
+[project.optional-dependencies]
+http = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-httpx>=0.30",
+    "ruff>=0.7",
+    "mypy>=1.11",
+]
+
+[project.scripts]
+sugra-api-mcp = "sugra_api_mcp.__main__:main"
+
+[project.urls]
+Homepage = "https://sugra.ai"
+Documentation = "https://docs.sugra.ai"
+Repository = "https://github.com/Sugra-Systems/prod-sugra-ai-MCP"
+Issues = "https://github.com/Sugra-Systems/prod-sugra-ai-MCP/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sugra_api_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_configs = true

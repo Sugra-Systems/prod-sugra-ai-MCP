@@ -1,0 +1,24 @@
+name: Deploy MCP to APP VM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sugra_api_mcp/**"
+      - "pyproject.toml"
+      - ".github/workflows/deploy-app-vm.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.APP_VM_HOST }}
+          username: ${{ secrets.APP_VM_USER }}
+          key: ${{ secrets.APP_VM_SSH_KEY }}
+          script: |
+            sudo /usr/local/bin/sugra-mcp-deploy
