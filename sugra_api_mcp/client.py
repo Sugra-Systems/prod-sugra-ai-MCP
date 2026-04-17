@@ -6,7 +6,12 @@ from typing import Any
 
 import httpx
 
+from . import __version__
 from .config import Config
+
+
+def _pkg_version() -> str:
+    return __version__
 
 
 class SugraClient:
@@ -18,7 +23,7 @@ class SugraClient:
             base_url=config.api_base,
             headers={
                 "x-api-key": config.api_key,
-                "User-Agent": "sugra-api-mcp/0.1.0",
+                "User-Agent": f"sugra-api-mcp/{_pkg_version()}",
                 "Accept": "application/json",
             },
             timeout=config.timeout,

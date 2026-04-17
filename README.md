@@ -6,7 +6,12 @@
 
 Official [Model Context Protocol](https://modelcontextprotocol.io) server for the [Sugra API](https://sugra.ai) - unified access to 518+ intelligence endpoints spanning financial markets, macroeconomics, fundamentals, government data, physical world signals, and news.
 
-Use it from Claude Desktop, Cursor, Zed, Cline, claude.ai, or any MCP-compatible agent.
+MCP is a vendor-neutral protocol. This server works with any MCP-compatible client, including:
+
+- **Anthropic**: Claude Desktop, Claude Code (CLI), claude.ai (web)
+- **OpenAI**: ChatGPT (via MCP connector)
+- **IDEs**: Cursor, Zed, Cline, Continue.dev, Windsurf
+- **Custom agents**: anything built on the Python or TypeScript MCP SDK
 
 ## What you get
 
@@ -41,8 +46,7 @@ Add to `claude_desktop_config.json`:
 {
   "mcpServers": {
     "sugra": {
-      "command": "python",
-      "args": ["-m", "sugra_api_mcp"],
+      "command": "sugra-api-mcp",
       "env": {
         "SUGRA_API_KEY": "sugra_xxx_yourkey..."
       }
@@ -53,19 +57,36 @@ Add to `claude_desktop_config.json`:
 
 Restart Claude Desktop. Sugra tools appear in the tools menu.
 
-## Usage with Cursor, Zed, Cline
+## Usage with Claude Code (Anthropic CLI)
 
-Same stdio config as above, in the respective MCP settings file.
+```bash
+claude mcp add sugra -- sugra-api-mcp
+# then set the env var that sugra-api-mcp reads
+export SUGRA_API_KEY=sugra_xxx_...
+```
 
-## Usage over HTTP (claude.ai, remote agents)
+Or edit `~/.claude/config.json` manually with the same shape as Claude Desktop above.
 
-If you prefer not to install anything locally, use the hosted Streamable HTTP endpoint:
+## Usage with Cursor, Zed, Cline, Continue.dev, Windsurf
+
+Each of these has an MCP settings file (typically `mcp.json` or equivalent) with the same stdio config shape as Claude Desktop.
+
+## Usage with ChatGPT
+
+ChatGPT supports MCP through its connector UI. Use the hosted HTTP endpoint (below) since ChatGPT does not launch local stdio processes.
+
+## Usage over HTTP (claude.ai, ChatGPT, remote agents)
+
+Hosted Streamable HTTP endpoint:
 
 ```
 https://app.sugra.ai/mcp
 ```
 
-Add to claude.ai or any Streamable HTTP MCP client with `Authorization: Bearer sugra_xxx_...` header.
+Add to claude.ai, ChatGPT, or any Streamable HTTP MCP client. Authenticate with `Authorization: Bearer sugra_xxx_...`.
+
+In claude.ai: Settings -> Connectors -> Add custom connector.
+In ChatGPT: Settings -> Connectors -> Add MCP server.
 
 ## Environment variables
 

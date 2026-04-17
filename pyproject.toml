@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sugra-api-mcp"
-version = "0.1.0"
-description = "Sugra API MCP server - unified access to 518+ intelligence endpoints from Claude Desktop, Cursor, Zed, and any MCP-compatible client"
+version = "0.1.1"
+description = "Sugra API MCP server - unified access to 518+ intelligence endpoints. Works with any MCP-compatible client: Claude Desktop, Claude Code, claude.ai, ChatGPT, Cursor, Zed, Cline, Continue.dev, Windsurf, and custom agents built on the MCP SDK."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [

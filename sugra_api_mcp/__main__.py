@@ -16,7 +16,7 @@ def main() -> None:
         "--transport",
         choices=["stdio", "streamable-http"],
         default="stdio",
-        help="MCP transport (default: stdio for Claude Desktop / Cursor / Zed)",
+        help="MCP transport (default: stdio for Claude Desktop, Claude Code, Cursor, Zed, etc.)",
     )
     parser.add_argument(
         "--host",
