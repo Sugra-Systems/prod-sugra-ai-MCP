@@ -4,9 +4,9 @@
 [![Python](https://img.shields.io/pypi/pyversions/sugra-api-mcp.svg)](https://pypi.org/project/sugra-api-mcp/)
 [![License](https://img.shields.io/pypi/l/sugra-api-mcp.svg)](https://github.com/Sugra-Systems/prod-sugra-ai-MCP/blob/main/LICENSE)
 
-Official [Model Context Protocol](https://modelcontextprotocol.io) server for the [Sugra API](https://sugra.ai) - unified access to 518+ intelligence endpoints spanning financial markets, macroeconomics, fundamentals, government data, physical world signals, and news.
+**Connector between LLM agents and world data.** Official [Model Context Protocol](https://modelcontextprotocol.io) server for the [Sugra API](https://sugra.ai) - 518+ endpoints aggregating 55+ primary sources across financial markets, macroeconomics, company fundamentals, government, physical world, and news.
 
-MCP is a vendor-neutral protocol. This server works with any MCP-compatible client, including:
+MCP is a vendor-neutral protocol. This server works with any MCP-compatible client:
 
 - **Anthropic**: Claude Desktop, Claude Code (CLI), claude.ai (web)
 - **OpenAI**: ChatGPT (via MCP connector)
