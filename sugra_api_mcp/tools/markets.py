@@ -107,6 +107,8 @@ async def search_symbol(query: str, asset_type: AssetType | None = None) -> dict
 
     Returns candidate symbols with name, exchange, and asset type.
 
+    Use before get_market_price when you only know the company name, not the ticker.
+
     Args:
         query: Search string. Examples: "apple", "tesla motors", "bitcoin", "euro to dollar".
         asset_type: Optional filter. If omitted, searches across all asset classes.

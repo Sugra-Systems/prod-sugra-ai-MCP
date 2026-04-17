@@ -21,6 +21,8 @@ async def get_macro_indicator(
     Returns a time series for the requested indicator, aggregated from primary sources
     (FRED, BIS, BOJ, BoE, StatCan, ABS, Eurostat, Destatis, and others).
 
+    For central bank policy rates (Fed, ECB, BoJ, BoE), prefer get_central_bank_rate for richer data.
+
     Args:
         country: Country code. Use lowercase 2-letter ISO codes ("us", "de", "jp", "uk",
             "ca", "au", "ch") or "eu" for Eurozone aggregate.
@@ -46,6 +48,8 @@ async def get_central_bank_rate(
     rate_type: str | None = None,
 ) -> dict[str, Any]:
     """Get current and historical policy rate for a major central bank.
+
+    This is the dedicated tool for policy rates. For broader macro series (GDP, CPI, unemployment, trade), use get_macro_indicator.
 
     Args:
         bank: Central bank code. "fed" (US Federal Reserve), "ecb" (European Central Bank),
@@ -81,8 +85,7 @@ async def search_economic_series(
 ) -> dict[str, Any]:
     """Search across all economic data series catalogs (FRED, BIS, BOJ, BoE, Eurostat).
 
-    Use this to discover what indicators are available when you don't know the exact
-    country/section combination for get_macro_indicator.
+    Discovery tool - use before get_macro_indicator when you don't know the exact country/section parameters.
 
     Args:
         query: Free-text search query.
