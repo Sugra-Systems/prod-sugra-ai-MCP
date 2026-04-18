@@ -27,13 +27,14 @@ async def get_earnings_calendar(
     (pre-market / after-hours), EPS estimate, and revenue estimate where
     available.
 
-    Default window is the next 7 days because the full 2-week global feed
-    exceeds the MCP 25000-token response limit. Pass explicit dates for a
-    different window, and narrow by ticker if you want a broader range.
+    Default window is the next 3 days because the global earnings feed has
+    ~200 events per day and the full week exceeds the MCP 25000-token
+    response limit. Pass explicit dates for a different window, and narrow
+    by ticker when looking further out.
 
     Args:
         start_date: Optional window start (YYYY-MM-DD). Default is today (UTC).
-        end_date: Optional window end (YYYY-MM-DD). Default is 7 days from today.
+        end_date: Optional window end (YYYY-MM-DD). Default is 3 days from today.
         symbol: Optional single-ticker filter (uppercase). Example: "AAPL".
 
     Examples:
@@ -44,7 +45,7 @@ async def get_earnings_calendar(
     client = get_client()
     today = datetime.now(UTC).date()
     start = start_date or today.isoformat()
-    end = end_date or (today + timedelta(days=7)).isoformat()
+    end = end_date or (today + timedelta(days=3)).isoformat()
     return await client.get(
         "/api/v1/finnhub/calendar/earnings",
         params={"from_date": start, "to_date": end, "symbol": symbol},
