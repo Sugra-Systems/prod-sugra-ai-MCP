@@ -9,6 +9,19 @@ dist/
 .eggs/
 *.egg
 
+# AI agent local state
+.claude/
+.codex/
+.Codex/
+.agents/
+
+# Scratch / temporary files
+.tmp/
+.research/
+scratch/
+tmp/
+temp/
+
 .venv/
 venv/
 env/
