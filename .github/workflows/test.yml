@@ -8,6 +8,7 @@ on:
       - '.codex/**'
       - '.Codex/**'
       - '.agents/**'
+      - '.github/workflows/**'
       - 'CLAUDE.md'
       - 'AGENTS.md'
       - '.gitignore'
