@@ -217,4 +217,4 @@ pytest
 
 ## License
 
-MIT © 2026 Sugra Systems, Inc. Author: Arman Obosyan with Codex.
+MIT © 2026 Sugra Systems, Inc.
