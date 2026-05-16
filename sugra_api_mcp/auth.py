@@ -33,6 +33,8 @@ logger = logging.getLogger("sugra_mcp.auth")
 
 SIGNING_ALGORITHMS = ["RS256"]
 
+REQUIRED_SCOPE = "sugra:read"
+
 API_KEY_CACHE_TTL_SECONDS = 300
 
 INTERNAL_HTTP_TIMEOUT_SECONDS = 10.0
@@ -94,7 +96,6 @@ class Authenticator:
                 token,
                 signing_key.key,
                 algorithms=SIGNING_ALGORITHMS,
-                issuer=self._config.app_url,
                 options={"verify_aud": False},
             )
         except jwt.ExpiredSignatureError as e:
@@ -102,13 +103,33 @@ class Authenticator:
         except jwt.InvalidTokenError as e:
             raise AuthError(f"Invalid token: {e}") from e
 
+        issuer = decoded.get("iss")
+        if issuer is not None and issuer != self._config.app_url:
+            raise AuthError("Invalid token issuer")
+
         sub = decoded.get("sub")
         if sub is None:
             raise AuthError("Token missing sub claim")
+        self._validate_scopes(decoded)
         try:
             return int(sub)
         except (TypeError, ValueError) as e:
             raise AuthError("Token sub is not an integer user id") from e
+
+    def _validate_scopes(self, decoded: dict) -> None:
+        scopes_claim = decoded.get("scopes")
+        if scopes_claim is None:
+            scopes_claim = decoded.get("scope", "")
+
+        if isinstance(scopes_claim, str):
+            scopes = set(scopes_claim.split())
+        elif isinstance(scopes_claim, list):
+            scopes = {str(scope) for scope in scopes_claim}
+        else:
+            scopes = set()
+
+        if REQUIRED_SCOPE not in scopes:
+            raise AuthError(f"Token missing required scope: {REQUIRED_SCOPE}")
 
     async def _lookup_api_key(self, user_id: int) -> str:
         now = time.time()

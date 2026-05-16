@@ -92,6 +92,36 @@ async def test_jwt_with_valid_signature_and_cached_key(auth_config, rsa_keypair)
     assert resolved == "sugra_cached_key"
 
 
+async def test_passport_jwt_without_issuer_is_accepted(auth_config, rsa_keypair):
+    private_key, public_pem = rsa_keypair
+    now = int(time.time())
+    token = _make_jwt(
+        private_key,
+        {
+            "aud": "test-client-id",
+            "jti": "test-token-id",
+            "sub": "42",
+            "exp": now + 3600,
+            "iat": now,
+            "nbf": now,
+            "scopes": ["sugra:read"],
+        },
+    )
+
+    auth = Authenticator(auth_config)
+    mock_signing_key = MagicMock()
+    mock_signing_key.key = public_pem
+
+    auth._jwks.get_signing_key_from_jwt = MagicMock(return_value=mock_signing_key)
+    auth._api_key_cache[42] = _CachedKey(
+        api_key="sugra_cached_key",
+        expires_at=time.time() + 60,
+    )
+
+    resolved = await auth.resolve(token)
+    assert resolved == "sugra_cached_key"
+
+
 async def test_jwt_expired_raises(auth_config, rsa_keypair):
     private_key, public_pem = rsa_keypair
     token = _make_jwt(
@@ -154,6 +184,28 @@ async def test_jwt_wrong_issuer_raises(auth_config, rsa_keypair):
         await auth.resolve(token)
 
 
+async def test_jwt_missing_read_scope_raises(auth_config, rsa_keypair):
+    private_key, public_pem = rsa_keypair
+    token = _make_jwt(
+        private_key,
+        {
+            "iss": "https://app.sugra.ai",
+            "sub": "42",
+            "exp": int(time.time()) + 3600,
+            "iat": int(time.time()),
+            "scopes": ["profile"],
+        },
+    )
+
+    auth = Authenticator(auth_config)
+    mock_signing_key = MagicMock()
+    mock_signing_key.key = public_pem
+    auth._jwks.get_signing_key_from_jwt = MagicMock(return_value=mock_signing_key)
+
+    with pytest.raises(AuthError, match="sugra:read"):
+        await auth.resolve(token)
+
+
 async def test_lookup_404_raises_with_user_message(auth_config, rsa_keypair):
     private_key, public_pem = rsa_keypair
     token = _make_jwt(
@@ -163,6 +215,7 @@ async def test_lookup_404_raises_with_user_message(auth_config, rsa_keypair):
             "sub": "42",
             "exp": int(time.time()) + 3600,
             "iat": int(time.time()),
+            "scopes": ["sugra:read"],
         },
     )
 
@@ -195,6 +248,7 @@ async def test_lookup_success_caches_result(auth_config, rsa_keypair):
             "sub": "7",
             "exp": int(time.time()) + 3600,
             "iat": int(time.time()),
+            "scopes": ["sugra:read"],
         },
     )
 
@@ -238,6 +292,7 @@ async def test_missing_internal_token_raises_500(auth_config, rsa_keypair):
             "sub": "1",
             "exp": int(time.time()) + 3600,
             "iat": int(time.time()),
+            "scopes": ["sugra:read"],
         },
     )
 
