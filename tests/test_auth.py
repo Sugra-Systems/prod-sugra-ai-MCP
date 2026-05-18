@@ -183,9 +183,8 @@ async def test_jwt_activity_validation_failure_denies_auth(auth_config, rsa_keyp
         call_count += 1
         return httpx.Response(403, json={"error": "connection_disconnected"})
 
-    with patch("httpx.AsyncClient.post", new=fake_post):
-        with pytest.raises(AuthError) as exc:
-            await auth.resolve(token)
+    with patch("httpx.AsyncClient.post", new=fake_post), pytest.raises(AuthError) as exc:
+        await auth.resolve(token)
 
     assert exc.value.status == 403
     assert "connection_disconnected" in str(exc.value)
@@ -225,9 +224,8 @@ async def test_jwt_activity_exception_denies_auth(auth_config, rsa_keypair):
         call_count += 1
         raise httpx.ConnectError("activity unavailable")
 
-    with patch("httpx.AsyncClient.post", new=fake_post):
-        with pytest.raises(AuthError) as exc:
-            await auth.resolve(token)
+    with patch("httpx.AsyncClient.post", new=fake_post), pytest.raises(AuthError) as exc:
+        await auth.resolve(token)
 
     assert exc.value.status == 502
     assert "validation" in str(exc.value)
