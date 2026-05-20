@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/sugra-api-mcp/">PyPI v0.5.4</a> |
+  <a href="https://pypi.org/project/sugra-api-mcp/">PyPI v0.5.5</a> |
   Python 3.11+ |
   <a href="https://github.com/Sugra-Systems/prod-sugra-ai-MCP/blob/main/LICENSE">MIT</a>
 </p>
@@ -127,7 +127,7 @@ sugra-api-mcp call quotes_symbol_price --params '{"symbol":"AAPL"}'
 | `SUGRA_API_BASE` | No | `https://sugra.ai` | Override for self-hosted or beta environments |
 | `SUGRA_TIMEOUT` | No | `30` | Request timeout in seconds |
 | `SUGRA_MCP_ALLOWED_HOSTS` | No (HTTP) | - | Comma-separated hostnames to allow behind a reverse proxy |
-| `SUGRA_MCP_ALLOWED_ORIGINS` | No (HTTP) | chatgpt.com, claude.ai, cursor.sh + others | Comma-separated CORS origins for browser-based MCP clients. `*` allows any origin (Bearer auth still required) |
+| `SUGRA_MCP_ALLOWED_ORIGINS` | No (HTTP) | chatgpt.com, claude.ai, cursor.sh + others | Comma-separated allowed Origins for browser-based MCP clients. Applies to BOTH the outer Starlette CORS layer and the inner FastMCP DNS rebinding Origin check, so the two stay in sync. `*` disables the inner Origin check entirely (self-hosted / dev only); Bearer auth still gates tool calls |
 
 ### HTTP transport with OAuth
 

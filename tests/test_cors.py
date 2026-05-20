@@ -198,3 +198,109 @@ def test_load_allowed_origins_empty_string_falls_back_to_defaults(monkeypatch):
     monkeypatch.setenv("SUGRA_MCP_ALLOWED_ORIGINS", "   ")
     origins = load_allowed_origins()
     assert "https://chatgpt.com" in origins
+
+
+def test_transport_security_includes_cors_origins(monkeypatch):
+    """Inner FastMCP DNS rebinding middleware must accept the same Origins as outer CORS.
+
+    Without this, the outer Starlette CORS layer would let preflight through
+    only to have the actual POST rejected with 403 Invalid Origin by
+    TransportSecurityMiddleware (mcp/server/transport_security.py).
+    """
+    from sugra_api_mcp.server import _build_transport_security
+
+    monkeypatch.setenv("SUGRA_MCP_ALLOWED_HOSTS", "app.sugra.ai")
+    monkeypatch.delenv("SUGRA_MCP_ALLOWED_ORIGINS", raising=False)
+
+    settings = _build_transport_security()
+
+    assert settings is not None
+    assert settings.enable_dns_rebinding_protection is True
+    assert "app.sugra.ai" in settings.allowed_hosts
+    # Both same-origin (https://app.sugra.ai derived from hosts) and the CORS
+    # browser-client origins must be present.
+    assert "https://app.sugra.ai" in settings.allowed_origins
+    assert "https://chatgpt.com" in settings.allowed_origins
+    assert "https://claude.ai" in settings.allowed_origins
+
+
+def test_transport_security_disabled_when_no_allowed_hosts(monkeypatch):
+    """Local stdio / dev: no hosted reverse proxy means no transport security."""
+    from sugra_api_mcp.server import _build_transport_security
+
+    monkeypatch.delenv("SUGRA_MCP_ALLOWED_HOSTS", raising=False)
+    assert _build_transport_security() is None
+
+
+def test_transport_security_wildcard_disables_inner_protection(monkeypatch):
+    """`SUGRA_MCP_ALLOWED_ORIGINS=*` opts out of the inner Origin check.
+
+    FastMCP's middleware has no wildcard syntax (only exact match + `:*` port
+    suffix), so the only way to honor the operator-stated intent of "trust
+    outer CORS" is to disable DNS rebinding protection entirely. Bearer auth
+    still gates tool calls. This is documented as self-hosted/dev only.
+    """
+    from sugra_api_mcp.server import _build_transport_security
+
+    monkeypatch.setenv("SUGRA_MCP_ALLOWED_HOSTS", "app.sugra.ai")
+    monkeypatch.setenv("SUGRA_MCP_ALLOWED_ORIGINS", "*")
+
+    settings = _build_transport_security()
+
+    assert settings is not None
+    assert settings.enable_dns_rebinding_protection is False
+
+
+def test_transport_security_honors_custom_origins_env(monkeypatch):
+    from sugra_api_mcp.server import _build_transport_security
+
+    monkeypatch.setenv("SUGRA_MCP_ALLOWED_HOSTS", "app.sugra.ai")
+    monkeypatch.setenv("SUGRA_MCP_ALLOWED_ORIGINS", "https://custom.example")
+
+    settings = _build_transport_security()
+
+    assert settings is not None
+    assert "https://custom.example" in settings.allowed_origins
+    # Defaults must NOT leak in when an explicit override is given.
+    assert "https://chatgpt.com" not in settings.allowed_origins
+
+
+def test_transport_security_middleware_accepts_chatgpt_origin(monkeypatch):
+    """End-to-end: simulate a POST with Origin: chatgpt.com through the actual
+    FastMCP TransportSecurityMiddleware and confirm it does not 403.
+
+    Without the cors_origins merge in _build_transport_security() this test
+    would fail with HTTP 403 Invalid Origin, which is exactly the production
+    bug Codex flagged as CORS-CRIT-1.
+    """
+    import asyncio
+
+    from mcp.server.transport_security import TransportSecurityMiddleware
+    from starlette.requests import Request
+
+    from sugra_api_mcp.server import _build_transport_security
+
+    monkeypatch.setenv("SUGRA_MCP_ALLOWED_HOSTS", "app.sugra.ai")
+    monkeypatch.delenv("SUGRA_MCP_ALLOWED_ORIGINS", raising=False)
+
+    settings = _build_transport_security()
+    middleware = TransportSecurityMiddleware(settings)
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (b"host", b"app.sugra.ai"),
+                (b"origin", b"https://chatgpt.com"),
+                (b"content-type", b"application/json"),
+            ],
+            "query_string": b"",
+            "path": "/mcp",
+        }
+    )
+
+    result = asyncio.run(middleware.validate_request(request, is_post=True))
+
+    # validate_request returns None on success, a Response on failure.
+    assert result is None, f"Inner transport security rejected ChatGPT Origin: {result!r}"
