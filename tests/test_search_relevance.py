@@ -43,8 +43,16 @@ from sugra_api_mcp.catalog.search import search_catalog
         ("CEO announcement", []),       # CEO in non-ticker list
         ("SEC filing", []),             # SEC in non-ticker list
         ("IRS form 1040", []),          # IRS in non-ticker list
-        ("AI revolution", []),          # AI in non-ticker list
         ("USDT price", []),             # major stablecoin, in non-ticker list
+        # Codex Round 2 finding: AI and IT are real NYSE tickers (C3.ai, Gartner).
+        # Without equity context they stay generic English acronyms.
+        ("AI revolution", []),          # no equity context -> not a ticker
+        ("IT support team", []),        # no equity context -> not a ticker
+        # WITH equity context, ambiguous tickers are re-admitted.
+        ("AI stock price", ["AI"]),     # equity context "stock price" -> ticker
+        ("IT price", ["IT"]),           # equity context "price" -> ticker
+        ("AI dividend", ["AI"]),        # equity context "dividend" -> ticker
+        ("AI market cap", ["AI"]),      # equity context "market cap" -> ticker
     ],
 )
 def test_detect_tickers(query: str, expected: list[str]) -> None:

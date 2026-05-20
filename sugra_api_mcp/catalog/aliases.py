@@ -71,12 +71,12 @@ CENTRAL_BANK_PREFIX_BOOSTS: dict[str, str] = {
 # "I need GDP data" or "A CPI endpoint" would otherwise count "I" / "A" as
 # tickers and trigger the equity boost.
 # Excluded reserved words that match this shape but are not tickers - includes
-# common business and tech acronyms (CEO, SEC, IRS, AI, IT, OK).
+# common business and tech acronyms (CEO, SEC, IRS, etc.).
 TICKER_TOKEN_RE = re.compile(r"\b[A-Z]{2,5}(?:\.[A-Z])?\b")
 _NON_TICKER_WORDS: frozenset[str] = frozenset({
     # Tech / formats
     "API", "MCP", "URL", "JSON", "HTTP", "HTTPS", "SSL", "TLS", "TCP", "UDP", "DNS",
-    "AI", "ML", "OS", "IT", "PC", "TV", "GPU", "CPU", "RAM",
+    "ML", "OS", "PC", "TV", "GPU", "CPU", "RAM",
     # Macro / finance indicators (not tickers)
     "CPI", "GDP", "PPI", "PMI", "ETF", "REIT", "IPO", "M2", "M1", "PE", "EPS",
     # Roles / institutions
@@ -95,6 +95,25 @@ _NON_TICKER_WORDS: frozenset[str] = frozenset({
     "US", "UK", "EU", "EEA", "EEC", "USA", "USSR", "NYC", "LA", "SF",
     "DC", "UAE", "DRC",
 })
+
+# Real NYSE tickers that collide with common English acronyms. Codex Round 2
+# flagged AI (C3.ai Inc.) and IT (Gartner Inc.) as real listed companies. These
+# are still default-excluded above, but `detect_tickers()` re-admits them when
+# the query carries strong equity-context vocabulary, so "AI revolution" stays
+# a generic AI query while "AI stock price" routes to quotes_symbol_*.
+_AMBIGUOUS_TICKERS: frozenset[str] = frozenset({
+    "AI",   # C3.ai Inc. (NYSE: AI)
+    "IT",   # Gartner Inc. (NYSE: IT)
+})
+
+# Strong-signal tokens that indicate an equity query when present near an
+# otherwise-ambiguous ticker. Kept narrow on purpose; expanding too far would
+# re-introduce the false positives that motivated the exclusion list.
+_EQUITY_CONTEXT_TERMS: tuple[str, ...] = (
+    "price", "stock", "ticker", "shares", "share price",
+    "market cap", "dividend", "earnings", "p/e",
+    "quote", "trading", "exchange",
+)
 
 # Currency pair detection: 3 letters + optional separator + 3 letters.
 # Matches "EUR/USD", "EURUSD", "EUR USD".
@@ -118,9 +137,34 @@ def matching_aliases(query: str) -> dict[str, list[str]]:
 def detect_tickers(query: str) -> list[str]:
     """Return likely stock ticker tokens (e.g. AAPL, MSFT, BRK.A) found in the raw query.
 
-    Heuristic: 1-5 uppercase letters not in the known non-ticker word list (CPI, USD, US, etc.).
+    Heuristic: 2-5 uppercase letters not in the known non-ticker word list (CPI,
+    USD, CEO, etc.). Ambiguous symbols that are both common acronyms AND real
+    NYSE tickers (AI, IT) are re-admitted when the query carries equity-context
+    vocabulary - so "AI revolution" stays a generic AI question while "AI stock
+    price" lands on quotes_symbol_*.
     """
-    return [m for m in TICKER_TOKEN_RE.findall(query) if m not in _NON_TICKER_WORDS]
+    matches = TICKER_TOKEN_RE.findall(query)
+    if not matches:
+        return []
+
+    has_equity_context = _query_has_equity_context(query)
+    result: list[str] = []
+    for token in matches:
+        # Ambiguous tickers (AI = C3.ai, IT = Gartner) are gated on equity
+        # context first to suppress "AI revolution" / "IT support" cases.
+        if token in _AMBIGUOUS_TICKERS:
+            if has_equity_context:
+                result.append(token)
+            continue
+        # Everything else flows through the non-ticker blacklist.
+        if token not in _NON_TICKER_WORDS:
+            result.append(token)
+    return result
+
+
+def _query_has_equity_context(query: str) -> bool:
+    lowered = query.lower()
+    return any(term in lowered for term in _EQUITY_CONTEXT_TERMS)
 
 
 def detect_currency_pairs(query: str) -> list[tuple[str, str]]:
