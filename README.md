@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/sugra-api-mcp/">PyPI v0.5.2</a> |
+  <a href="https://pypi.org/project/sugra-api-mcp/">PyPI v0.5.4</a> |
   Python 3.11+ |
   <a href="https://github.com/Sugra-Systems/prod-sugra-ai-MCP/blob/main/LICENSE">MIT</a>
 </p>
@@ -127,10 +127,11 @@ sugra-api-mcp call quotes_symbol_price --params '{"symbol":"AAPL"}'
 | `SUGRA_API_BASE` | No | `https://sugra.ai` | Override for self-hosted or beta environments |
 | `SUGRA_TIMEOUT` | No | `30` | Request timeout in seconds |
 | `SUGRA_MCP_ALLOWED_HOSTS` | No (HTTP) | - | Comma-separated hostnames to allow behind a reverse proxy |
+| `SUGRA_MCP_ALLOWED_ORIGINS` | No (HTTP) | chatgpt.com, claude.ai, cursor.sh + others | Comma-separated CORS origins for browser-based MCP clients. `*` allows any origin (Bearer auth still required) |
 
 ### HTTP transport with OAuth
 
-When running with `--transport streamable-http` the server allows unauthenticated MCP discovery requests (`initialize`, `notifications/initialized`, `tools/list`, `resources/list`, `prompts/list`, and `ping`) so ChatGPT Apps and other mixed-auth clients can discover tool metadata. Tool calls still require `Authorization: Bearer ...`. Two token formats are accepted:
+When running with `--transport streamable-http` the server allows unauthenticated MCP discovery requests (`initialize`, `notifications/initialized`, `tools/list`, `resources/list`, `prompts/list`, and `ping`) so ChatGPT Apps and other mixed-auth clients can discover tool metadata. CORS is enabled for major MCP clients (ChatGPT, Claude, Cursor) so browser connector UIs can complete the OAuth flow; override the allowlist with `SUGRA_MCP_ALLOWED_ORIGINS`. Tool calls still require `Authorization: Bearer ...`. Two token formats are accepted:
 
 - Raw API key (`sugra_...`) - passed through as the downstream `x-api-key`. Compatible with earlier local API-key setups.
 - OAuth JWT - signature verified against the issuer's JWKS. The audience must match `https://app.sugra.ai/mcp`, the token must include `sugra:read`, and hosted access is validated against APP before resolving the user's primary API key. Successful hosted OAuth requests update MCP connection activity in APP.
