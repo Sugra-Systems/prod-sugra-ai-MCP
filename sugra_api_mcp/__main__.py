@@ -43,13 +43,37 @@ def _run_server(args: argparse.Namespace) -> None:
         mcp.run(transport="stdio")
     else:
         import uvicorn
+        from starlette.middleware.cors import CORSMiddleware
 
         from .auth import Authenticator, AuthMiddleware
-        from .config import load_auth_config
+        from .config import load_allowed_origins, load_auth_config
 
         auth = Authenticator(load_auth_config())
         app = mcp.streamable_http_app()
+        # Order matters: Starlette applies middleware in REVERSE registration
+        # order, so AuthMiddleware added first ends up as the inner layer and
+        # CORSMiddleware added second wraps it as the outer layer. OPTIONS
+        # preflight is then handled by CORS before reaching auth.
         app.add_middleware(AuthMiddleware, authenticator=auth)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=load_allowed_origins(),
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=[
+                "Authorization",
+                "Content-Type",
+                "Mcp-Session-Id",
+                "MCP-Protocol-Version",
+                "Accept",
+                "Last-Event-ID",
+            ],
+            expose_headers=[
+                "WWW-Authenticate",
+                "Mcp-Session-Id",
+                "MCP-Protocol-Version",
+            ],
+            max_age=86400,
+        )
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

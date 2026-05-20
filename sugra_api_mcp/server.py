@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from contextvars import ContextVar
 from copy import deepcopy
@@ -13,7 +14,7 @@ from mcp.types import Tool as MCPTool
 from mcp.types import ToolAnnotations
 
 from .client import SugraClient
-from .config import Config, load_config
+from .config import Config, load_allowed_origins, load_config
 
 api_key_ctx: ContextVar[str | None] = ContextVar("sugra_api_key", default=None)
 
@@ -73,16 +74,41 @@ def _build_transport_security() -> TransportSecuritySettings | None:
     When deployed behind a reverse proxy (e.g. nginx at app.sugra.ai), the Host
     header won't match the default localhost allowlist. Set the env var to a
     comma-separated list of public hostnames to allow.
+
+    Browser-based MCP clients (ChatGPT Connectors UI) send an Origin header
+    that the inner FastMCP middleware also validates against
+    ``allowed_origins``. The outer Starlette CORS layer would otherwise let
+    the preflight through only to have the actual request rejected with 403
+    Invalid Origin from this inner layer, so the two allowlists must stay in
+    sync.
     """
     raw = os.environ.get("SUGRA_MCP_ALLOWED_HOSTS", "").strip()
     if not raw:
         return None
     hosts = [h.strip() for h in raw.split(",") if h.strip()]
+
+    cors_origins = load_allowed_origins()
+    if cors_origins == ["*"]:
+        # SUGRA_MCP_ALLOWED_ORIGINS=* asks both layers to allow any origin.
+        # FastMCP's inner middleware does not understand "*" as a glob (only
+        # exact match and ":*" port suffix), so we disable inner DNS rebinding
+        # protection entirely. Host check is also lost; Bearer auth still
+        # gates tool calls and the outer reverse proxy still constrains Host.
+        # Intended for self-hosted or dev only.
+        logging.getLogger("sugra_mcp.security").warning(
+            "SUGRA_MCP_ALLOWED_ORIGINS=*: inner DNS rebinding protection "
+            "disabled. Bearer auth still gates tool calls, but the hosted MCP "
+            "endpoint becomes browser-reachable from any origin. Use only for "
+            "self-hosted or dev environments."
+        )
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=[*hosts, "127.0.0.1:*", "localhost:*", "[::1]:*"],
         allowed_origins=[
             *[f"https://{h}" for h in hosts],
+            *cors_origins,
             "http://127.0.0.1:*",
             "http://localhost:*",
             "http://[::1]:*",

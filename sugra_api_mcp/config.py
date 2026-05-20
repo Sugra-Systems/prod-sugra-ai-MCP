@@ -5,6 +5,16 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = (
+    "https://chatgpt.com",
+    "https://chat.openai.com",
+    "https://platform.openai.com",
+    "https://claude.ai",
+    "https://claude.com",
+    "https://cursor.sh",
+    "https://app.cursor.sh",
+)
+
 
 @dataclass(frozen=True)
 class Config:
@@ -48,3 +58,25 @@ def load_auth_config() -> AuthConfig:
     jwks_url = os.environ.get("SUGRA_JWKS_URL", f"{app_url}/oauth/jwks.json")
     internal_token = os.environ.get("INTERNAL_API_TOKEN", "").strip() or None
     return AuthConfig(app_url=app_url, jwks_url=jwks_url, internal_token=internal_token)
+
+
+def load_allowed_origins() -> list[str]:
+    """Load CORS allowed origins for the HTTP transport.
+
+    Browser-based MCP clients (ChatGPT Connectors UI) send a CORS preflight
+    before the actual MCP request. Without an exact-match origin in the
+    response, the browser blocks the call and the connector add flow fails
+    silently. Server-to-server clients (claude.ai backend, Codex CLI, stdio
+    Claude Desktop) ignore CORS entirely, which is why this only matters
+    for the hosted HTTP endpoint.
+
+    `SUGRA_MCP_ALLOWED_ORIGINS` (comma-separated) overrides the default. A
+    value of `*` allows any origin; only safe because hosted access is gated
+    by Bearer token rather than browser cookies.
+    """
+    raw = os.environ.get("SUGRA_MCP_ALLOWED_ORIGINS", "").strip()
+    if not raw:
+        return list(DEFAULT_ALLOWED_ORIGINS)
+    if raw == "*":
+        return ["*"]
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
