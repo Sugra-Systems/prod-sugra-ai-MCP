@@ -9,23 +9,36 @@ Custom dimensions captured per MCP tool invocation:
     mcp.tool.name        - one of search_endpoints / describe_endpoint /
                            call_endpoint / fetch_data / list_toolsets /
                            list_sources
-    mcp.operation_id     - the operation_id arg (only call_endpoint and
-                           describe_endpoint receive one)
+    mcp.operation_id     - the operation_id kwarg, ONLY if it matches a
+                           catalog-known operation_id (allowlist). Arbitrary
+                           client-supplied strings (PII, secrets, free text)
+                           are dropped.
     mcp.success          - bool, derived from whether the tool returned
                            an "error" key or raised
-    mcp.error.code       - the "error" key value if present, never the
-                           free-text message (avoids leaking PII)
+    mcp.error.code       - the "error" key value if present AND if it
+                           matches the known error-code allowlist. Free-text
+                           upstream error messages are mapped to
+                           "unknown_error" so they cannot reach the span.
     mcp.duration_ms      - integer ms wall-clock from before-call to
                            after-return
+    mcp.exception.type   - exception class name only (NEVER the message)
 
-Privacy: raw query strings, params dicts, body payloads, and response
-payloads are NEVER attached to spans. Tool name + operation_id (both
-from the bundled catalog, not user content) + success flag + integer
-error code are catalog-derived and safe.
+Privacy contract (enforced by tests):
+- Raw query strings, params dicts, body payloads, response payloads are
+  NEVER attached to spans.
+- Exception messages are NEVER attached (only the class name).
+- operation_id and error_code are validated against catalog/whitelist
+  allowlists before attachment.
+- All bundled OpenTelemetry instrumentations (fastapi, requests, urllib,
+  urllib3, azure_sdk, etc.) are explicitly DISABLED to prevent them from
+  emitting auto-spans with URL/query attributes outside this allowlist.
+- All span operations are wrapped in try/except; a telemetry failure
+  cannot mask a tool result or leave a span un-ended.
 """
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import logging
 import os
@@ -40,13 +53,48 @@ R = TypeVar("R")
 
 _INITIALISED = False
 _TRACER: Any | None = None
+_VALID_OPERATION_IDS: frozenset[str] | None = None
+
+# Known MCP-tool error codes. Any string returned at result["error"] that is
+# NOT in this set is mapped to "unknown_error" so free-text upstream messages
+# (which can contain PII or query content) cannot reach App Insights.
+_KNOWN_ERROR_CODES: frozenset[str] = frozenset({
+    "unknown_operation_id",
+    "missing_required_parameters",
+    "unsupported_method",
+    "unresolved_path_parameters",
+    "no_endpoint_found",
+    "stale_search_result",
+    "response_too_large",
+    "validation_failed",
+    "auth_failed",
+})
+
+# Codex Round 1 Critical #1: azure-monitor-opentelemetry enables all bundled
+# instrumentations by default (fastapi, requests, urllib, urllib3, azure_sdk,
+# django, flask, psycopg2). Those auto-spans carry URL + query-string
+# attributes that bypass our privacy contract. Disable every bundled
+# instrumentation explicitly so the only spans we emit are the ones we
+# author here.
+_DISABLE_ALL_INSTRUMENTATION = {
+    "azure_sdk": {"enabled": False},
+    "django": {"enabled": False},
+    "fastapi": {"enabled": False},
+    "flask": {"enabled": False},
+    "psycopg2": {"enabled": False},
+    "requests": {"enabled": False},
+    "urllib": {"enabled": False},
+    "urllib3": {"enabled": False},
+}
 
 
 def setup_observability(connection_string: str | None = None) -> bool:
     """Configure Azure Monitor OpenTelemetry if a connection string is available.
 
     Returns True when instrumentation is active, False when skipped (env
-    var not set or azure-monitor-opentelemetry not installed).
+    var not set or azure-monitor-opentelemetry not installed). Never logs
+    exception messages (only class names) so setup failures cannot leak
+    text through any subsequently-attached log exporter.
     """
     global _INITIALISED, _TRACER
     if _INITIALISED:
@@ -66,10 +114,12 @@ def setup_observability(connection_string: str | None = None) -> bool:
     except ImportError as e:
         # azure-monitor-opentelemetry not in the install (e.g. plain stdio
         # install with `pip install sugra-api-mcp`). Don't fail; just disable.
+        # Log the exception class only - never str(e), to keep any future
+        # log-export path from carrying free text.
         logger.warning(
-            "azure-monitor-opentelemetry not installed; MCP tool spans disabled. "
-            "Install with `pip install 'sugra-api-mcp[http]'`. (%s)",
-            e,
+            "azure-monitor-opentelemetry not installed (%s); MCP tool spans disabled. "
+            "Install with `pip install 'sugra-api-mcp[http]'`.",
+            type(e).__name__,
         )
         _INITIALISED = True
         return False
@@ -77,32 +127,88 @@ def setup_observability(connection_string: str | None = None) -> bool:
     try:
         configure_azure_monitor(
             connection_string=conn,
-            # Service name shows up as `cloud_RoleName` in App Insights so
-            # MCP traces are easy to filter from API traces when both share
-            # a workspace.
+            # cloud_RoleName for filtering in App Insights when API + MCP
+            # share a workspace.
             resource_attributes={"service.name": "sugra-mcp"},
-            # Disable logger handler injection - we already log to journalctl
-            # and don't want duplicate ingest. Spans / traces only.
+            # No automatic log handler injection - we log to journalctl
+            # only and do NOT want any exception messages exported as
+            # traces (privacy contract).
             disable_logging=True,
             disable_metrics=False,
+            # Codex CRIT-1: disable every bundled auto-instrumentation so
+            # only our explicit `@trace_mcp_tool` spans reach the workspace.
+            instrumentation_options=_DISABLE_ALL_INSTRUMENTATION,
         )
         _TRACER = trace.get_tracer("sugra_mcp.tools")
         _INITIALISED = True
         logger.info("Azure Monitor instrumentation active for sugra-mcp")
         return True
     except Exception as e:
-        # Never let observability setup take down the MCP server.
-        logger.warning("Azure Monitor configuration failed; spans disabled: %s", e)
+        # Never let observability setup take down the MCP server. Log class
+        # only, not the message.
+        logger.warning(
+            "Azure Monitor configuration failed (%s); spans disabled.",
+            type(e).__name__,
+        )
         _INITIALISED = True
         return False
+
+
+def _get_valid_operation_ids() -> frozenset[str]:
+    """Lazy-init frozen set of catalog operation_ids for kwarg validation.
+
+    Used by the decorator to allowlist `operation_id` kwargs before
+    setting them as span attributes - prevents clients from labeling
+    spans with arbitrary strings (PII, secrets, free-text).
+    """
+    global _VALID_OPERATION_IDS
+    if _VALID_OPERATION_IDS is None:
+        try:
+            from .catalog.loader import load_catalog
+
+            _VALID_OPERATION_IDS = frozenset(e.operation_id for e in load_catalog().endpoints)
+        except Exception:
+            # If catalog load fails (e.g. broken install), bail to empty
+            # set rather than crash. operation_id will simply not be
+            # attached to spans until catalog loads next.
+            _VALID_OPERATION_IDS = frozenset()
+    return _VALID_OPERATION_IDS
+
+
+def _safe_attr(span: Any, key: str, value: Any) -> None:
+    """Set a span attribute, silencing any exporter / SDK failure.
+
+    Telemetry must never mask a tool result or original exception.
+    """
+    with contextlib.suppress(Exception):
+        span.set_attribute(key, value)
+
+
+def _safe_status_error(span: Any) -> None:
+    with contextlib.suppress(Exception):
+        from opentelemetry.trace import Status, StatusCode
+
+        span.set_status(Status(StatusCode.ERROR))
+
+
+def _safe_end(span: Any) -> None:
+    with contextlib.suppress(Exception):
+        span.end()
 
 
 def trace_mcp_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Decorator that wraps an async MCP tool with an OpenTelemetry span.
 
-    The span carries the custom dimensions documented at the module level.
-    When `setup_observability()` was a no-op (env var unset or SDK missing)
+    The span carries the dimensions documented at the module level. When
+    `setup_observability()` was a no-op (env var unset or SDK missing)
     the decorator is a transparent pass-through with zero overhead.
+
+    Failure-safety guarantees:
+    - If span creation fails, the tool still runs.
+    - If any set_attribute / set_status / end call fails, the tool result
+      is preserved and the original exception (if any) is re-raised
+      unchanged.
+    - span.end() is guaranteed via try/finally.
 
     Usage::
 
@@ -119,58 +225,56 @@ def trace_mcp_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Call
                 return await func(*args, **kwargs)
 
             start = time.perf_counter()
-            span = _TRACER.start_span(name=f"mcp.tool.{tool_name}")
-            span.set_attribute("mcp.tool.name", tool_name)
-
-            # operation_id is the most-useful per-call dimension. Capture it
-            # ONLY when passed as a kwarg - never from positional args. This
-            # is the safe path because search_endpoints / fetch_data take a
-            # query string as the first positional, and we MUST NOT label
-            # raw user queries as operation_ids (privacy + correctness).
-            # The MCP runtime passes tool arguments as kwargs per JSON-RPC
-            # params unpacking, so we never lose real operation_ids here.
-            operation_id = kwargs.get("operation_id")
-            if isinstance(operation_id, str):
-                span.set_attribute("mcp.operation_id", operation_id)
+            span: Any = None
+            try:
+                span = _TRACER.start_span(name=f"mcp.tool.{tool_name}")
+            except Exception:
+                # Span creation itself failed - run the tool without
+                # telemetry rather than masking the call.
+                return await func(*args, **kwargs)
 
             try:
-                result = await func(*args, **kwargs)
-            except Exception as e:
-                span.set_attribute("mcp.success", False)
-                span.set_attribute("mcp.error.code", "exception")
-                span.set_attribute("mcp.duration_ms", int((time.perf_counter() - start) * 1000))
-                # Record the exception type but NOT the message - message may
-                # contain user query content or PII from upstream APIs.
-                span.set_attribute("mcp.exception.type", type(e).__name__)
-                span.set_status(trace_status_error())
-                span.end()
-                raise
+                _safe_attr(span, "mcp.tool.name", tool_name)
 
-            # Success path: inspect the returned dict for "error" key without
-            # surfacing the full payload. Keep dimensions catalog-only.
-            success = True
-            error_code: str | None = None
-            if isinstance(result, dict):
-                error_value = result.get("error")
-                if isinstance(error_value, str):
-                    success = False
-                    error_code = error_value
-            span.set_attribute("mcp.success", success)
-            if error_code is not None:
-                span.set_attribute("mcp.error.code", error_code)
-            span.set_attribute("mcp.duration_ms", int((time.perf_counter() - start) * 1000))
-            span.end()
-            return result
+                # Codex CRIT-2: operation_id is attached ONLY if the kwarg
+                # value matches a catalog-known operation_id. Arbitrary
+                # client-supplied strings (PII / secrets / free text) are
+                # dropped before reaching App Insights.
+                operation_id = kwargs.get("operation_id")
+                if isinstance(operation_id, str) and operation_id in _get_valid_operation_ids():
+                    _safe_attr(span, "mcp.operation_id", operation_id)
+
+                try:
+                    result = await func(*args, **kwargs)
+                except Exception as e:
+                    _safe_attr(span, "mcp.success", False)
+                    _safe_attr(span, "mcp.error.code", "exception")
+                    _safe_attr(span, "mcp.exception.type", type(e).__name__)
+                    _safe_attr(span, "mcp.duration_ms", int((time.perf_counter() - start) * 1000))
+                    _safe_status_error(span)
+                    raise
+
+                # Success path: catalog-bounded error code allowlist.
+                success = True
+                error_code: str | None = None
+                if isinstance(result, dict):
+                    error_value = result.get("error")
+                    if isinstance(error_value, str):
+                        success = False
+                        # Codex CRIT-3: map unknown error strings to a
+                        # constant so free-text upstream messages cannot
+                        # reach the span attribute.
+                        error_code = (
+                            error_value if error_value in _KNOWN_ERROR_CODES else "unknown_error"
+                        )
+                _safe_attr(span, "mcp.success", success)
+                if error_code is not None:
+                    _safe_attr(span, "mcp.error.code", error_code)
+                _safe_attr(span, "mcp.duration_ms", int((time.perf_counter() - start) * 1000))
+                return result
+            finally:
+                _safe_end(span)
 
         return wrapper
 
     return decorator
-
-
-def trace_status_error():
-    """Return an OpenTelemetry StatusCode.ERROR, importing lazily so the
-    module imports without azure-monitor-opentelemetry installed.
-    """
-    from opentelemetry.trace import Status, StatusCode
-
-    return Status(StatusCode.ERROR)

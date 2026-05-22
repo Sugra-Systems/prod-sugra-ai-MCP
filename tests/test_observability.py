@@ -220,3 +220,186 @@ def test_setup_observability_is_idempotent(monkeypatch) -> None:
     first = observability.setup_observability()
     second = observability.setup_observability()
     assert first == second
+
+
+# ---- Codex Round 1 fixes ----
+
+
+def test_unknown_operation_id_kwarg_is_not_attached_to_span(monkeypatch) -> None:
+    """Codex CRIT-2: a client supplying an arbitrary string as operation_id
+    kwarg (PII, secret, raw query text) must NOT have that string labeled
+    as mcp.operation_id. Only catalog-known operation_ids pass the allowlist.
+    """
+    tracer = _install_fake_tracer(monkeypatch)
+
+    @observability.trace_mcp_tool("call_endpoint")
+    async def fake_call(operation_id: str) -> dict:
+        return {"data": {}}
+
+    secret_like = "user_email_arman_at_outlook_dot_com_SECRET_XYZQ"
+    asyncio.run(fake_call(operation_id=secret_like))
+
+    # The string is not in the catalog -> must not appear in span attributes.
+    assert "mcp.operation_id" not in tracer.spans[0].attributes
+    for value in tracer.spans[0].attributes.values():
+        if isinstance(value, str):
+            assert secret_like not in value
+
+
+def test_known_operation_id_kwarg_is_attached_to_span(monkeypatch) -> None:
+    """Positive contract for Codex CRIT-2: a real catalog-known operation_id
+    IS recorded as mcp.operation_id. Demonstrates the allowlist works both
+    ways - real values pass, arbitrary strings are dropped.
+    """
+    tracer = _install_fake_tracer(monkeypatch)
+
+    @observability.trace_mcp_tool("call_endpoint")
+    async def fake_call(operation_id: str) -> dict:
+        return {"data": {}}
+
+    # quotes_symbol_price exists in the bundled catalog (stable since v0.4.0).
+    asyncio.run(fake_call(operation_id="quotes_symbol_price"))
+
+    assert tracer.spans[0].attributes.get("mcp.operation_id") == "quotes_symbol_price"
+
+
+def test_unknown_error_string_is_mapped_to_unknown_error(monkeypatch) -> None:
+    """Codex CRIT-3: any string at result["error"] that is not in the known
+    error-code allowlist must be mapped to the constant "unknown_error".
+    Prevents free-text upstream error messages from reaching the span.
+    """
+    tracer = _install_fake_tracer(monkeypatch)
+
+    @observability.trace_mcp_tool("call_endpoint")
+    async def fake_call(operation_id: str = "test") -> dict:
+        return {
+            "error": "Upstream API returned: invalid JWT for user@example.com leaked secret_token=abc123",
+        }
+
+    asyncio.run(fake_call())
+
+    span = tracer.spans[0]
+    assert span.attributes["mcp.success"] is False
+    assert span.attributes["mcp.error.code"] == "unknown_error"
+    # Privacy invariant: the upstream free-text must not appear anywhere.
+    for value in span.attributes.values():
+        if isinstance(value, str):
+            assert "secret_token" not in value
+            assert "user@example.com" not in value
+
+
+def test_known_error_code_is_passed_through(monkeypatch) -> None:
+    """Positive contract for Codex CRIT-3: known catalog error codes
+    (unknown_operation_id / missing_required_parameters / etc.) ARE
+    preserved on the span - they are operational signal, not free-text.
+    """
+    tracer = _install_fake_tracer(monkeypatch)
+
+    @observability.trace_mcp_tool("call_endpoint")
+    async def fake_call() -> dict:
+        return {"error": "missing_required_parameters", "missing": ["symbol"]}
+
+    asyncio.run(fake_call())
+
+    span = tracer.spans[0]
+    assert span.attributes["mcp.error.code"] == "missing_required_parameters"
+
+
+def test_telemetry_failure_does_not_mask_tool_result(monkeypatch) -> None:
+    """Codex IMP-3: if set_attribute crashes (e.g. exporter has rolled out
+    a breaking change), the wrapper must still return the tool's real
+    result rather than masking the call with a telemetry error.
+    """
+    class _BrokenSpan:
+        def __init__(self, name: str):
+            self.ended = False
+
+        def set_attribute(self, key: str, value: object) -> None:
+            raise RuntimeError("simulated exporter failure")
+
+        def set_status(self, status) -> None:
+            raise RuntimeError("simulated exporter failure")
+
+        def end(self) -> None:
+            self.ended = True
+
+    class _BrokenTracer:
+        def __init__(self):
+            self.last_span: _BrokenSpan | None = None
+
+        def start_span(self, name: str) -> _BrokenSpan:
+            self.last_span = _BrokenSpan(name)
+            return self.last_span
+
+    tracer = _BrokenTracer()
+    monkeypatch.setattr(observability, "_TRACER", tracer)
+
+    @observability.trace_mcp_tool("search_endpoints")
+    async def fake_tool(query: str) -> dict:
+        return {"results": [{"operation_id": "x"}]}
+
+    # Real tool result must come through even when every telemetry call
+    # throws on us.
+    result = asyncio.run(fake_tool("AAPL"))
+    assert result == {"results": [{"operation_id": "x"}]}
+    # Span end must still have been attempted (via finally clause).
+    assert tracer.last_span is not None
+    assert tracer.last_span.ended is True
+
+
+def test_telemetry_failure_does_not_mask_tool_exception(monkeypatch) -> None:
+    """When the tool itself raises AND telemetry calls also fail, the
+    decorator must re-raise the TOOL's exception, not the telemetry one.
+    """
+    class _BrokenSpan:
+        def __init__(self, name: str):
+            self.ended = False
+
+        def set_attribute(self, key: str, value: object) -> None:
+            raise RuntimeError("exporter died")
+
+        def set_status(self, status) -> None:
+            raise RuntimeError("exporter died")
+
+        def end(self) -> None:
+            self.ended = True
+
+    class _BrokenTracer:
+        def __init__(self):
+            self.last_span: _BrokenSpan | None = None
+
+        def start_span(self, name: str) -> _BrokenSpan:
+            self.last_span = _BrokenSpan(name)
+            return self.last_span
+
+    tracer = _BrokenTracer()
+    monkeypatch.setattr(observability, "_TRACER", tracer)
+
+    @observability.trace_mcp_tool("call_endpoint")
+    async def fake_call() -> dict:
+        raise ValueError("the tool's real error")
+
+    with pytest.raises(ValueError, match="the tool's real error"):
+        asyncio.run(fake_call())
+
+    # span.end still called via finally.
+    assert tracer.last_span is not None
+    assert tracer.last_span.ended is True
+
+
+def test_span_creation_failure_falls_back_to_direct_call(monkeypatch) -> None:
+    """If start_span itself fails, run the tool without telemetry rather
+    than mask the call.
+    """
+    class _BrokenTracer:
+        def start_span(self, name: str):
+            raise RuntimeError("tracer is broken")
+
+    monkeypatch.setattr(observability, "_TRACER", _BrokenTracer())
+
+    @observability.trace_mcp_tool("list_toolsets")
+    async def fake_tool() -> dict:
+        return {"ok": True}
+
+    result = asyncio.run(fake_tool())
+    assert result == {"ok": True}
