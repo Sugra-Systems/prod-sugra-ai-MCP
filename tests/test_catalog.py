@@ -366,6 +366,36 @@ def test_endpoint_dict_round_trip_with_request_body_schema() -> None:
     assert "request_body_schema" not in quote.to_dict()
 
 
+def test_toolset_for_tags_maps_sugra_net_atlas_to_network() -> None:
+    """The 53 Net Atlas endpoints used to fall into the catch-all core
+    toolset (478 endpoints) because their tag was missing from the map -
+    network engineers could not discover them via list_toolsets."""
+    from sugra_api_mcp.catalog.toolsets import BROAD_TOOLSETS, toolset_for_tags
+
+    assert toolset_for_tags(["Sugra Net Atlas"]) == "network"
+    assert "network" in BROAD_TOOLSETS
+
+
+def test_ordered_toolsets_carries_descriptions() -> None:
+    from sugra_api_mcp.catalog.toolsets import ordered_toolsets
+
+    out = ordered_toolsets({"network": 53, "digital_infra": 56, "core": 425})
+    by_name = {entry["name"]: entry for entry in out}
+
+    assert "Net Atlas" in by_name["network"]["description"]
+    # digital_infra must be explicit that it is blockchain, not internet
+    # infrastructure - it misled network engineers in the field test.
+    assert "blockchain" in by_name["digital_infra"]["description"].lower()
+    assert "network" in by_name["digital_infra"]["description"].lower()
+
+
+def test_every_broad_toolset_has_a_description() -> None:
+    from sugra_api_mcp.catalog.toolsets import BROAD_TOOLSETS, TOOLSET_DESCRIPTIONS
+
+    missing = [name for name in BROAD_TOOLSETS if not TOOLSET_DESCRIPTIONS.get(name)]
+    assert not missing, f"toolsets without descriptions: {missing}"
+
+
 def test_catalog_builder_fails_on_missing_operation_id() -> None:
     openapi = {
         "paths": {
