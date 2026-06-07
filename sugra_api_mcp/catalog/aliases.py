@@ -94,6 +94,14 @@ _NON_TICKER_WORDS: frozenset[str] = frozenset({
     # Country / geographic codes
     "US", "UK", "EU", "EEA", "EEC", "USA", "USSR", "NYC", "LA", "SF",
     "DC", "UAE", "DRC",
+    # Networking / internet infrastructure (field test 2026-06-07: "IXP"
+    # passed the ticker regex and routed a Sugra Net Atlas query to top-20
+    # quotes_symbol_*). IP and NAT are handled in _AMBIGUOUS_TICKERS below
+    # because they are also real NYSE listings.
+    "IXP", "BGP", "ASN", "CDN", "VPN", "ISP", "CIDR", "RIPE", "RDNS",
+    "PTR", "NTP", "ICMP", "SNMP", "TOR", "WHOIS", "RPKI", "ROA", "IANA",
+    "ICANN", "IETF", "APNIC", "ARIN", "LIR", "RIR", "DDOS", "LAN", "WAN",
+    "MTU", "TTL",
 })
 
 # Real NYSE tickers that collide with common English acronyms - AI (C3.ai Inc.)
@@ -104,16 +112,72 @@ _NON_TICKER_WORDS: frozenset[str] = frozenset({
 _AMBIGUOUS_TICKERS: frozenset[str] = frozenset({
     "AI",   # C3.ai Inc. (NYSE: AI)
     "IT",   # Gartner Inc. (NYSE: IT)
+    "IP",   # International Paper (NYSE: IP) - also the networking acronym
+    "NAT",  # Nordic American Tankers (NYSE: NAT) - also network address translation
 })
 
 # Strong-signal tokens that indicate an equity query when present near an
 # otherwise-ambiguous ticker. Kept narrow on purpose; expanding too far would
 # re-introduce the false positives that motivated the exclusion list.
+# Bare "exchange" was dropped (Codex S3 review): it collides with "internet
+# exchange" and "exchange rate" - the phrase form below keeps the equity case.
 _EQUITY_CONTEXT_TERMS: tuple[str, ...] = (
     "price", "stock", "ticker", "shares", "share price",
     "market cap", "dividend", "earnings", "p/e",
-    "quote", "trading", "exchange",
+    "quote", "trading", "stock exchange",
 )
+
+# Network / internet-infrastructure vocabulary. Used by search to detect when
+# a query is dominated by the networking domain so the equity ticker boost
+# does not hijack it (field test 2026-06-07: "network ... internet exchange
+# IXP traceroute ping measurement create" returned top-20 quotes_symbol_*).
+# Single words match as whole tokens (so "shipping" does not hit "ping");
+# multi-word phrases match as token-bounded substrings of the normalized query.
+_NETWORK_CONTEXT_TERMS: tuple[str, ...] = (
+    "traceroute", "ping", "ixp", "internet exchange", "bgp", "asn",
+    "anycast", "peering", "rdns", "reverse dns", "geolocation", "ip address",
+    "subnet", "prefix", "probe", "measurement", "ripe", "atlas", "whois",
+    "latency", "dns", "tor", "exit node", "network",
+)
+
+_WORD_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _match_vocabulary(query: str, terms: tuple[str, ...]) -> list[str]:
+    """Return distinct vocabulary terms present in the query, token-bounded.
+
+    Single-word terms match whole tokens only ("Stockholm" does not satisfy
+    "stock", "shipping" does not satisfy "ping"); multi-word terms match as
+    token-bounded substrings of the normalized query ("p/e" matches its
+    tokenized form "p e").
+    """
+    tokens = _WORD_TOKEN_RE.findall(query.lower())
+    if not tokens:
+        return []
+    token_set = set(tokens)
+    normalized = f" {' '.join(tokens)} "
+    hits: list[str] = []
+    for term in terms:
+        term_tokens = _WORD_TOKEN_RE.findall(term)
+        if not term_tokens:
+            continue
+        if len(term_tokens) == 1:
+            if term_tokens[0] in token_set:
+                hits.append(term)
+        elif f" {' '.join(term_tokens)} " in normalized:
+            hits.append(term)
+    return hits
+
+
+def detect_network_terms(query: str) -> list[str]:
+    """Return distinct network-domain vocabulary terms found in the query.
+
+    Search uses the count of distinct hits as a domain-dominance signal: two
+    or more terms mean the query belongs to the networking domain and the
+    equity ticker boost should not fire on ticker-shaped tokens like IXP.
+    """
+    return _match_vocabulary(query, _NETWORK_CONTEXT_TERMS)
+
 
 # Currency pair detection: 3 letters + optional separator + 3 letters.
 # Matches "EUR/USD", "EURUSD", "EUR USD".
@@ -147,7 +211,7 @@ def detect_tickers(query: str) -> list[str]:
     if not matches:
         return []
 
-    has_equity_context = _query_has_equity_context(query)
+    has_equity_context = query_has_equity_context(query)
     result: list[str] = []
     for token in matches:
         # Ambiguous tickers (AI = C3.ai, IT = Gartner) are gated on equity
@@ -162,9 +226,16 @@ def detect_tickers(query: str) -> list[str]:
     return result
 
 
-def _query_has_equity_context(query: str) -> bool:
-    lowered = query.lower()
-    return any(term in lowered for term in _EQUITY_CONTEXT_TERMS)
+def query_has_equity_context(query: str) -> bool:
+    """True when the query carries explicit equity vocabulary (stock, price, ...).
+
+    Token-bounded (Codex S3 review): "Stockholm" must not satisfy "stock" -
+    a substring match here re-admitted IP/NAT as tickers and disabled the
+    network-domain suppression for clearly network queries. Public because
+    search uses it as an override: explicit equity wording keeps the ticker
+    boost alive even when network-domain terms dominate.
+    """
+    return bool(_match_vocabulary(query, _EQUITY_CONTEXT_TERMS))
 
 
 def detect_currency_pairs(query: str) -> list[tuple[str, str]]:

@@ -92,6 +92,64 @@ async def test_call_endpoint_validates_missing_required_params(monkeypatch) -> N
     assert fake.calls == []
 
 
+async def test_describe_endpoint_includes_request_body_schema(monkeypatch) -> None:
+    """Clients used to guess POST body keys: the builder discarded the
+    requestBody schema (field-test defect, S3/MCP-Imp-6)."""
+    monkeypatch.setattr(gateway, "load_catalog", _fixture_catalog)
+
+    described = await gateway.describe_endpoint("openfigi_map")
+
+    schema = described["request_body_schema"]
+    assert schema["required"] == ["jobs"]
+    assert schema["properties"]["jobs"]["items"]["properties"]["idType"] == {"type": "string"}
+    # GET endpoints stay lean - no empty schema noise.
+    quote = await gateway.describe_endpoint("quotes_symbol_price")
+    assert "request_body_schema" not in quote
+
+
+async def test_fetch_data_needs_params_exposes_request_body_schema(monkeypatch) -> None:
+    monkeypatch.setattr(gateway, "load_catalog", _fixture_catalog)
+    monkeypatch.setattr(gateway, "get_client", lambda: FakeClient())
+
+    result = await gateway.fetch_data("Map identifiers to OpenFIGI")
+
+    assert result["needs_params"] == ["body"]
+    schema = result["selected_endpoint"]["request_body_schema"]
+    assert schema["required"] == ["jobs"]
+
+
+async def test_call_endpoint_applies_fields_to_envelope_less_payload(monkeypatch) -> None:
+    """Field test 2026-06-07: Net Atlas endpoints return flat dicts (no data
+    envelope) and `fields` was a silent no-op - the full payload came back
+    while meta.shaped echoed the requested fields.
+    """
+
+    class FlatClient(FakeClient):
+        async def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+            self.calls.append(("GET", path, params, None))
+            return {
+                "ip": "8.8.8.8",
+                "asn": 15169,
+                "rdns": "dns.google",
+                "geo": {"city": "Ashburn", "country": "US"},
+                "_meta": {"atlas_built_at": "2026-06-01"},
+            }
+
+    fake = FlatClient()
+    monkeypatch.setattr(gateway, "load_catalog", _fixture_catalog)
+    monkeypatch.setattr(gateway, "get_client", lambda: fake)
+
+    result = await gateway.call_endpoint("air_quality_current", fields=["ip", "geo.city"])
+
+    assert result["ip"] == "8.8.8.8"
+    assert result["geo"] == {"city": "Ashburn"}
+    assert "rdns" not in result
+    assert "asn" not in result
+    assert result["_meta"] == {"atlas_built_at": "2026-06-01"}
+    assert result["meta"]["shaped"]["fields_applied"] == ["ip", "geo.city"]
+    assert result["meta"]["shaped"]["fields_unmatched"] == []
+
+
 async def test_gateway_lists_toolsets_and_sources(monkeypatch) -> None:
     monkeypatch.setattr(gateway, "load_catalog", _fixture_catalog)
 
