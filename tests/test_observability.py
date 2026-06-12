@@ -315,6 +315,7 @@ def test_known_error_code_is_passed_through(monkeypatch) -> None:
         "upstream_connect_error",
         "upstream_transport_error",
         "tool_execution_failed",
+        "agent_plane_unavailable",
     ],
 )
 def test_transport_error_codes_pass_the_allowlist(monkeypatch, code: str) -> None:
@@ -338,6 +339,63 @@ def test_transport_error_codes_pass_the_allowlist(monkeypatch, code: str) -> Non
     for value in span.attributes.values():
         if isinstance(value, str):
             assert "free text stays out of spans" not in value
+
+
+def test_result_attrs_extractor_emits_extra_dimensions(monkeypatch) -> None:
+    """MCP-2.3: the optional result_attrs extractor enriches SUCCESS spans
+    with envelope-metadata dimensions (recipe_version / units / ...). The
+    extractor owns the privacy allowlist; the wrapper just applies its output.
+    """
+    tracer = _install_fake_tracer(monkeypatch)
+
+    @observability.trace_mcp_tool(
+        "get_snapshot",
+        result_attrs=lambda result: {"mcp.agent.units": result["billing"]["rate_limit_cost"]},
+    )
+    async def fake_snapshot() -> dict:
+        return {"status": "full", "billing": {"rate_limit_cost": 2}}
+
+    asyncio.run(fake_snapshot())
+
+    span = tracer.spans[0]
+    assert span.attributes["mcp.agent.units"] == 2
+    assert span.attributes["mcp.success"] is True
+
+
+def test_result_attrs_extractor_skipped_on_error_result(monkeypatch) -> None:
+    """Error results carry no envelope metadata worth extracting - the
+    extractor only runs on the success path."""
+    tracer = _install_fake_tracer(monkeypatch)
+    calls: list[object] = []
+
+    def _extract(result: object) -> dict[str, object]:
+        calls.append(result)
+        return {"mcp.agent.units": 99}
+
+    @observability.trace_mcp_tool("get_snapshot", result_attrs=_extract)
+    async def fake_snapshot() -> dict:
+        return {"error": "agent_plane_unavailable", "status_code": 403}
+
+    asyncio.run(fake_snapshot())
+
+    assert calls == []
+    assert "mcp.agent.units" not in tracer.spans[0].attributes
+
+
+def test_result_attrs_extractor_crash_is_swallowed(monkeypatch) -> None:
+    """A buggy extractor must neither break the tool result nor the base
+    dimensions."""
+    tracer = _install_fake_tracer(monkeypatch)
+
+    def _boom(result: object) -> dict[str, object]:
+        raise RuntimeError("extractor crash")
+
+    @observability.trace_mcp_tool("get_snapshot", result_attrs=_boom)
+    async def fake_snapshot() -> dict:
+        return {"status": "full"}
+
+    assert asyncio.run(fake_snapshot()) == {"status": "full"}
+    assert tracer.spans[0].attributes["mcp.success"] is True
 
 
 def test_telemetry_failure_does_not_mask_tool_result(monkeypatch) -> None:
