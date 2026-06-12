@@ -362,6 +362,39 @@ def test_result_attrs_extractor_emits_extra_dimensions(monkeypatch) -> None:
     assert span.attributes["mcp.success"] is True
 
 
+def test_agent_extractor_emits_all_five_dimensions_no_request_values(monkeypatch) -> None:
+    """The REAL agent extractor through the real decorator: all five
+    mcp.agent.* dimensions land on the span, and no request/entity value
+    (ticker, query text) appears in ANY span attribute (privacy invariant)."""
+    from sugra_api_mcp.tools.agent import _agent_result_attrs
+
+    tracer = _install_fake_tracer(monkeypatch)
+
+    @observability.trace_mcp_tool("get_snapshot", result_attrs=_agent_result_attrs)
+    async def fake_snapshot(recipe: str, entity: dict) -> dict:
+        return {
+            "schema_version": "1",
+            "recipe_version": "company_snapshot@1",
+            "status": "partial",
+            "data": {"price": {"price": 123.4, "symbol": "SECRETTICKER"}},
+            "freshness": {"class": "computed_mixed", "stale": True},
+            "billing": {"rate_limit_cost": 2, "downstream_calls": 4, "remaining": 998},
+        }
+
+    asyncio.run(fake_snapshot("company_snapshot", {"namespace": "equity", "ids": {"symbol": "SECRETTICKER"}}))
+
+    span = tracer.spans[0]
+    assert span.attributes["mcp.agent.recipe_version"] == "company_snapshot@1"
+    assert span.attributes["mcp.agent.status"] == "partial"
+    assert span.attributes["mcp.agent.units"] == 2
+    assert span.attributes["mcp.agent.downstream_calls"] == 4
+    assert span.attributes["mcp.agent.stale"] is True
+    # Privacy: request/entity values never reach span attributes.
+    for value in span.attributes.values():
+        if isinstance(value, str):
+            assert "SECRETTICKER" not in value
+
+
 def test_result_attrs_extractor_skipped_on_error_result(monkeypatch) -> None:
     """Error results carry no envelope metadata worth extracting - the
     extractor only runs on the success path."""

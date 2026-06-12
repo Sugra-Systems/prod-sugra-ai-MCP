@@ -103,16 +103,36 @@ def test_register_explicit_instance_does_not_touch_global(monkeypatch):
     assert agent_tools._registered_global is False
 
 
-def test_stdio_surface_does_not_include_agent_tools():
-    """Importing the tools package (what stdio startup does) must NOT register
-    agent tools even if the env var leaks into a stdio process - registration
-    is invoked only from the streamable-http branch of __main__."""
-    from sugra_api_mcp.server import mcp as global_mcp
+def test_stdio_surface_does_not_include_agent_tools_even_with_token():
+    """A stdio process with SUGRA_AGENT_INTERNAL_TOKEN leaked into its env
+    must STILL not expose the agent tools - registration is invoked only from
+    the streamable-http branch of __main__, never as an import side effect.
+    Runs in a SUBPROCESS with the token SET before the import (Codex code
+    review P2: an in-process check on a token-less interpreter cannot catch a
+    regression where import-time registration sneaks back in)."""
+    import subprocess
+    import sys
+    from pathlib import Path
 
-    names = _tool_names(global_mcp)
-    assert "resolve_entity" not in names
-    assert "get_snapshot" not in names
-    assert "get_timeseries" not in names
+    code = (
+        "import asyncio, os\n"
+        "os.environ['SUGRA_AGENT_INTERNAL_TOKEN'] = 'leaked-into-stdio'\n"
+        "import sugra_api_mcp.tools  # what stdio startup does\n"
+        "from sugra_api_mcp.server import mcp\n"
+        "names = {t.name for t in asyncio.run(mcp.list_tools())}\n"
+        "assert 'resolve_entity' not in names, names\n"
+        "assert 'get_snapshot' not in names, names\n"
+        "assert 'get_timeseries' not in names, names\n"
+        "print(len(names))\n"
+    )
+    repo_root = Path(__file__).resolve().parent.parent
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True, cwd=repo_root, check=True,
+    )
+    from tests.test_metadata_sync import EXPECTED_TOOL_COUNT
+
+    assert int(out.stdout.strip()) == EXPECTED_TOOL_COUNT
 
 
 # ---------------------------------------------------------------------------
