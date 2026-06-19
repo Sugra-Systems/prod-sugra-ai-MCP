@@ -84,3 +84,45 @@ def test_non_api_path_does_not_crash() -> None:
 
     assert hints["duration_class"] == "fast"
     assert hints["max_concurrency"] == 4
+
+
+def test_slow_weather_paths_are_slow() -> None:
+    """BUG-3.2: the weather family is mixed. flood (GloFAS heavy per-request
+    compute), climate (CMIP6), and nws (api.weather.gov live) carry a 30s
+    client budget in the API and can approach the gateway timeout. Labeling
+    them "fast" made an agent fire parallel calls with a short budget and hit
+    502s on cold cells. They must be "slow"."""
+    for path in (
+        "/api/v1/weather/flood",
+        "/api/v1/weather/flood/ensemble",
+        "/api/v1/weather/climate/projection",
+        "/api/v1/weather/nws/forecast",
+        "/api/v1/weather/nws/forecast/hourly",
+    ):
+        hints = hints_for(_endpoint(path=path))
+        assert hints["duration_class"] == "slow", path
+        assert hints["max_concurrency"] == 2, path
+
+
+def test_slow_path_match_is_segment_bounded() -> None:
+    """A slow key matches a whole segment, not a prefix of a longer one - a
+    hypothetical /weather/floodplain path must not inherit flood's slow class."""
+    hints = hints_for(_endpoint(path="/api/v1/weather/floodplain/maps"))
+    assert hints["duration_class"] == "fast"
+    assert hints["max_concurrency"] == 4
+
+
+def test_fast_weather_paths_stay_fast() -> None:
+    """The rest of the weather family reads fast upstreams (forecast 10s,
+    marine 15s, us 10s, air-quality 15s client budget) - they must NOT be
+    over-tagged slow by the flood/climate/nws rule."""
+    for path in (
+        "/api/v1/weather/forecast",
+        "/api/v1/weather/marine/forecast",
+        "/api/v1/weather/marine/hourly",
+        "/api/v1/weather/us/forecast",
+        "/api/v1/air-quality/forecast",
+    ):
+        hints = hints_for(_endpoint(path=path))
+        assert hints["duration_class"] == "fast", path
+        assert hints["max_concurrency"] == 4, path

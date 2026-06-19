@@ -54,6 +54,21 @@ _DURATION_NOTES = {
 # "slow" would over-tag them.
 _SLOW_FAMILIES = frozenset({"comtrade", "gfw", "gleif", "network", "wits", "wto"})
 
+# Individually slow paths inside otherwise-fast families. The weather family is
+# mixed: forecast/marine/us/air-quality read fast upstreams (10-15s client
+# budget in the API), but flood (GloFAS heavy per-request compute), climate
+# (CMIP6), and nws (api.weather.gov live) carry a 30s client budget and can
+# approach the gateway timeout. Verified against prod-sugra-ai-API/helpers
+# client _TIMEOUTs (flood/climate/noaa_nws = 30s). BUG-3.2: flood was labeled
+# "fast", so an agent fired parallel calls with a short budget and hit 502s on
+# cold cells. A family-level slow would over-tag the fast weather paths, so this
+# is a per-path list. Re-verify the backing client _TIMEOUT before adding a path.
+_SLOW_PATHS = (
+    "/weather/flood",
+    "/weather/climate",
+    "/weather/nws",
+)
+
 _DEFAULT_MAX_CONCURRENCY = 4
 # Field-tested on network: 3 parallel calls starve each other behind the
 # shared upstream budget (the other live-proxy families share the same
@@ -82,6 +97,16 @@ def _is_per_item_bulk(endpoint: Endpoint) -> bool:
     return endpoint.method == "POST" and "/bulk/" in endpoint.path
 
 
+def _is_slow_path(path: str) -> bool:
+    """An individually slow path inside an otherwise-fast family (see _SLOW_PATHS).
+
+    Segment-bounded: a key matches a whole `/weather/flood` segment (and any
+    sub-path under it) but not a longer segment like `/weather/floodplain`.
+    """
+    bounded = path if path.endswith("/") else path + "/"
+    return any((slow + "/") in bounded for slow in _SLOW_PATHS)
+
+
 def hints_for(endpoint: Endpoint) -> dict[str, Any]:
     """Return computed agent hints for one endpoint.
 
@@ -95,7 +120,7 @@ def hints_for(endpoint: Endpoint) -> dict[str, Any]:
     if _is_per_item_bulk(endpoint):
         duration = DURATION_HEAVY
         max_concurrency = _HEAVY_MAX_CONCURRENCY
-    elif _path_family(endpoint.path) in _SLOW_FAMILIES:
+    elif _path_family(endpoint.path) in _SLOW_FAMILIES or _is_slow_path(endpoint.path):
         duration = DURATION_SLOW
         max_concurrency = _SLOW_MAX_CONCURRENCY
     else:
