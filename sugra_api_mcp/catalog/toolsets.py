@@ -12,6 +12,7 @@ BROAD_TOOLSETS = [
     "central_banks",
     "public_finance",
     "hedge_fund_intelligence",
+    "entity_screening",
     "environment",
     "digital_infra",
     "network",
@@ -35,6 +36,11 @@ TOOLSET_DESCRIPTIONS: dict[str, str] = {
     "central_banks": "Central bank rates, balance sheets, and monetary statistics",
     "public_finance": "Government finance, treasury operations, and public debt",
     "hedge_fund_intelligence": "Institutional holdings, 13F filings, and fund positioning",
+    "entity_screening": (
+        "Sugra Entity: sanctions and PEP screening, entity resolution, "
+        "screening-corpus coverage and freshness (sources, max_age_hours, "
+        "covered regimes), and wallet or ID screening"
+    ),
     "environment": "Climate, weather, air quality, and emissions data",
     "digital_infra": (
         "Blockchain and digital-economy metrics (on-chain charts, mining, "
@@ -79,7 +85,9 @@ TAG_TOOLSET_MAP = {
     "public finance government": "public_finance",
     "public finance and government": "public_finance",
     "reference": "core",
+    "sugra entity": "entity_screening",
     "sugra net atlas": "network",
+    "sugra netatlas": "network",
     "trade": "trade",
 }
 
