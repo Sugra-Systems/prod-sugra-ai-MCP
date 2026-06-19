@@ -197,6 +197,32 @@ def test_search_top_1_lands_in_correct_namespace(
     )
 
 
+# Entity screening-corpus metadata discoverability (MCP-3.1). The STRAT-1.7
+# benchmark found agents could not reach /entity/sources via the gateway
+# (claude abstained; codex brute-forced). These are the exact agent-vocabulary
+# queries that must now surface the coverage/staleness manifest top-1.
+ENTITY_SOURCES_TOP_1_QUERIES = [
+    "ofac_sdn max_age_hours",
+    "ofac sdn staleness",
+    "sanctions source attribution",
+    "covered_regimes order",
+    "staleness thresholds for sanctions lists",
+    "sanctions screening corpus coverage",
+    "source configuration for screening",
+]
+
+
+@pytest.mark.parametrize("query", ENTITY_SOURCES_TOP_1_QUERIES)
+def test_entity_sources_is_top_1_for_screening_metadata(catalog, query: str) -> None:
+    results = search_catalog(catalog, query, limit=5)
+    assert results, f"search returned no results for {query!r}"
+    actual = results[0]["operation_id"]
+    assert actual == "entity_sources", (
+        f"top-1 for {query!r} was {actual!r}; expected entity_sources. "
+        f"Full top-5: {[r['operation_id'] for r in results]}"
+    )
+
+
 def test_crypto_context_query_surfaces_crypto_namespace(catalog) -> None:
     """Crypto-context queries must surface crypto-namespace endpoints in top-3.
 
